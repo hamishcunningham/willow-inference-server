@@ -9,6 +9,7 @@ from fastapi import FastAPI, UploadFile, Request, Response, status, WebSocket, W
 # =============== hook point 0 ================
 from fastapi import BackgroundTasks
 import contextvars
+import requests
 # ============= hook point 0 end ==============
 from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
@@ -1156,9 +1157,29 @@ async def to_thread(func, /, *args, **kwargs): # current WIS container is python
     func_call = functools.partial(ctx.run, func, *args, **kwargs)
     return await loop.run_in_executor(None, func_call)
 
+lvy_flsk_chat = True
+lvy_wis_chat = False
 chatResponseQueue = asyncio.Queue()
+def flask_request(text: str):
+    logger.debug("preparing flask request...")
+    try:
+        headers = {'Content-Type': 'application/json'}
+        response = requests.post('http://10.0.0.30:19091/backchat', json={'text': text}, headers=headers)
+        response.raise_for_status()
+        logger.debug("flask request complete")
+        return response.text
+    except requests.exceptions.RequestException as e:
+        logger.error(f"error in Flask request: {e}")
+        return str(e)
 async def background_chat(text: str):
-    task = asyncio.create_task(to_thread(do_chatbot, text))
+    loop = asyncio.get_running_loop()
+    if lvy_flsk_chat:
+        logger.debug("calling chatbot via flask")
+        task = asyncio.create_task(to_thread(flask_request, text))
+        logger.debug("flask call thread started")
+    elif lvy_wis_chat:
+        logger.debug("calling WIS internal chatbot")
+        task = asyncio.create_task(to_thread(do_chatbot, text))
     await chatResponseQueue.put(task)
 
 @app.get("/api/chatresponse")
