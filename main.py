@@ -6,6 +6,10 @@ import os
 import logging
 # FastAPI preprocessor
 from fastapi import FastAPI, UploadFile, Request, Response, status, WebSocket, WebSocketDisconnect
+# =============== hook point 0 ================
+from fastapi import BackgroundTasks
+import contextvars
+# ============= hook point 0 end ==============
 from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
@@ -1145,10 +1149,32 @@ async def asr(request: Request, audio_file: UploadFile, response: Response,
     # stats.print_stats(10) # top 10 rows
     return JSONResponse(content=final_response)
 
+# =============== hook point 1 ================
+async def to_thread(func, /, *args, **kwargs): # current WIS container is python 3.8
+    loop = asyncio.get_running_loop()
+    ctx = contextvars.copy_context()
+    func_call = functools.partial(ctx.run, func, *args, **kwargs)
+    return await loop.run_in_executor(None, func_call)
+
+chatResponseQueue = asyncio.Queue()
+async def background_chat(text: str):
+    task = asyncio.create_task(to_thread(do_chatbot, text))
+    await chatResponseQueue.put(task)
+
+@app.get("/api/chatresponse")
+async def chat_response():
+    chatresponse = ""
+    if not chatResponseQueue.empty():
+        task = await chatResponseQueue.get()
+        if task.done():
+            chatresponse = task.result()
+    return {"chatresponse": chatresponse}
+# ============= hook point 1 end ==============
 
 @app.post("/api/willow", response_model=ASR, summary="Stream Willow audio for ASR",
           response_description="ASR engine output")
-async def willow(request: Request, response: Response, model: Optional[str] = whisper_model_default,
+async def willow(request: Request, response: Response, background_tasks: BackgroundTasks, # XXX hook point 2 XXX
+                 model: Optional[str] = whisper_model_default,
                  detect_language: Optional[bool] = detect_language, beam_size: Optional[int] = beam_size,
                  force_language: Optional[str] = None, translate: Optional[bool] = False,
                  save_audio: Optional[bool] = False, stats: Optional[bool] = False,
@@ -1245,6 +1271,16 @@ async def willow(request: Request, response: Response, model: Optional[str] = wh
     # Handle translation in one response
     if translation:
         final_response['translation'] = translation
+
+    logger.debug("=============== hook point 3 ================")
+    logger.debug(final_response)
+    if final_response['text']:
+        background_tasks.add_task(background_chat, final_response['text'])
+    logger.debug(f"chatResponseQueue.qsize() = {chatResponseQueue.qsize()}")
+#   while not chatResponseQueue.empty():
+#       item = await chatResponseQueue.get()
+#       logger.debug(item)
+    logger.debug("============= hook point 3 end ==============")
 
     return JSONResponse(content=final_response)
 
