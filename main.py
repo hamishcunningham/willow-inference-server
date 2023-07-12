@@ -1172,7 +1172,6 @@ def flask_request(text: str):
         logger.error(f"error in Flask request: {e}")
         return str(e)
 async def background_chat(text: str):
-    loop = asyncio.get_running_loop()
     if lvy_flsk_chat:
         logger.debug("calling chatbot via flask")
         task = asyncio.create_task(to_thread(flask_request, text))
