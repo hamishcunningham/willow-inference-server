@@ -6,11 +6,10 @@ import os
 import logging
 # FastAPI preprocessor
 from fastapi import FastAPI, UploadFile, Request, Response, status, WebSocket, WebSocketDisconnect
-# =============== hook point 0 ================
+# =============== hook point 0 ================ ##############################
 from fastapi import BackgroundTasks
-import contextvars
-import requests
-# ============= hook point 0 end ==============
+import contextvars, requests, asyncio, websockets, ssl, json, os
+# ============= hook point 0 end ============== ##############################
 from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
@@ -1150,27 +1149,49 @@ async def asr(request: Request, audio_file: UploadFile, response: Response,
     # stats.print_stats(10) # top 10 rows
     return JSONResponse(content=final_response)
 
-# =============== hook point 1 ================
+# =============== hook point 1 ================ ##############################
 async def to_thread(func, /, *args, **kwargs): # current WIS container is python 3.8
     loop = asyncio.get_running_loop()
     ctx = contextvars.copy_context()
     func_call = functools.partial(ctx.run, func, *args, **kwargs)
     return await loop.run_in_executor(None, func_call)
 
+history_dir =    "chat-hist" # TODO has to be linked to wllw/flsk/chat-hist
+incoming_dir =  f"{history_dir}/incoming"
+def queue2file(jdata): #######################################################
+    try:
+        logger.debug(f"makedirs {incoming_dir}")
+        os.makedirs(incoming_dir, exist_ok=True)
+        now = datetime.datetime.now()
+        datetime_string = now.strftime('%Y-%m-%d--%H-%M-%S')
+        file_path = os.path.join(incoming_dir, f'{datetime_string}.json')
+        logger.debug(f"writing {file_path}")
+        with open(file_path, 'w') as f:
+            json.dump(jdata, f, indent=4)  # pretty-print with 4 spaces
+            f.write("\n")
+        logger.debug(f"queued chat request to {file_path}")
+        return jdata
+    except Exception as e:
+        logger.debug(str(e))
+        return "{ 'text': 'error' }"
+
 lvy_flsk_chat = True
 lvy_wis_chat = False
 chatResponseQueue = asyncio.Queue()
-def flask_request(text: str):
+def flask_request(text: str): ################################################
     logger.debug("preparing flask request...")
-    try:
-        headers = {'Content-Type': 'application/json'}
-        response = requests.post('http://10.0.0.30:19091/backchat', json={'text': text}, headers=headers)
-        response.raise_for_status()
-        logger.debug("flask request complete")
-        return response.text
-    except requests.exceptions.RequestException as e:
-        logger.error(f"error in Flask request: {e}")
-        return str(e)
+    jdata = {'text': text}
+    return queue2file(jdata)
+# old version, that calls the process-chat flask API at /backchat:
+#   try:
+#       headers = {'Content-Type': 'application/json'}
+#       response = requests.post('http://10.0.0.30:19091/backchat', json={'text': text}, headers=headers)
+#       response.raise_for_status()
+#       logger.debug("flask request complete")
+#       return response.text
+#   except requests.exceptions.RequestException as e:
+#       logger.error(f"error in Flask request: {e}")
+#       return str(e)
 async def background_chat(text: str):
     if lvy_flsk_chat:
         logger.debug("calling chatbot via flask")
@@ -1181,7 +1202,7 @@ async def background_chat(text: str):
         task = asyncio.create_task(to_thread(do_chatbot, text))
     await chatResponseQueue.put(task)
 
-@app.get("/api/chatresponse")
+@app.get("/api/chatresponse") ################################################
 async def chat_response():
     chatresponse = ""
     if not chatResponseQueue.empty():
@@ -1297,9 +1318,6 @@ async def willow(request: Request, response: Response, background_tasks: Backgro
     if final_response['text']:
         background_tasks.add_task(background_chat, final_response['text'])
     logger.debug(f"chatResponseQueue.qsize() = {chatResponseQueue.qsize()}")
-#   while not chatResponseQueue.empty():
-#       item = await chatResponseQueue.get()
-#       logger.debug(item)
     logger.debug("============= hook point 3 end ==============")
 
     return JSONResponse(content=final_response)
