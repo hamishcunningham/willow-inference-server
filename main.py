@@ -196,6 +196,9 @@ support_chunking = settings.support_chunking
 # Support for TTS
 support_tts = settings.support_tts
 
+# TTS device
+tts_device = settings.tts_device
+
 # Support for SV
 support_sv = settings.support_sv
 
@@ -206,6 +209,8 @@ support_chatbot = settings.support_chatbot
 sv_threshold = settings.sv_threshold
 
 whisper_model_default = settings.whisper_model_default
+
+whisper_device = settings.whisper_device
 
 tts_default_speaker = settings.tts_default_speaker
 
@@ -295,7 +300,8 @@ if device == "cuda":
             support_chatbot = False
 
     # Set ctranslate device index based on number of supported devices
-    device_index = [*range(0, cuda_num_devices, 1)]
+    # HC device_index = [*range(0, cuda_num_devices, 1)]
+    device_index = [ 0 ]
 else:
     num_cpu_cores = os.cpu_count()
     compute_type = "int8"
@@ -384,9 +390,9 @@ def load_models() -> Models:
         logger.info("Loading TTS models...")
         tts_processor = transformers.SpeechT5Processor.from_pretrained("./models/microsoft-speecht5_tts")
         tts_model = transformers.SpeechT5ForTextToSpeech.from_pretrained("./models/microsoft-speecht5_tts").to(
-            device=device)
+            device=tts_device)
         tts_vocoder = transformers.SpeechT5HifiGan.from_pretrained("./models/microsoft-speecht5_hifigan").to(
-            device=device)
+            device=tts_device)
     else:
         tts_processor = None
         tts_model = None
@@ -721,7 +727,7 @@ def do_tts(text, format='FLAC', speaker=tts_default_speaker):
         logger.debug(f'TTS: Loaded custom speaker {speaker}')
 
     speaker_embedding = np.load(speaker_numpy)
-    speaker_embedding = torch.tensor(speaker_embedding).unsqueeze(0).to(device=device)
+    speaker_embedding = torch.tensor(speaker_embedding).unsqueeze(0).to(device=tts_device)
     time_end = datetime.datetime.now()
     infer_time = time_end - time_initial_start
     infer_time_milliseconds = infer_time.total_seconds() * 1000
@@ -729,7 +735,7 @@ def do_tts(text, format='FLAC', speaker=tts_default_speaker):
 
     # Get inputs
     time_start = datetime.datetime.now()
-    inputs = models.tts_processor(text=text, is_split_into_words=True, return_tensors="pt").to(device=device)
+    inputs = models.tts_processor(text=text, is_split_into_words=True, return_tensors="pt").to(device=tts_device)
     time_end = datetime.datetime.now()
     infer_time = time_end - time_start
     infer_time_milliseconds = infer_time.total_seconds() * 1000
@@ -737,9 +743,11 @@ def do_tts(text, format='FLAC', speaker=tts_default_speaker):
 
     # Generate audio - SLOW
     time_start = datetime.datetime.now()
+    logger.debug('****************** tts device = ' + tts_device)   # HC
     with torch.inference_mode():
         audio = models.tts_model.generate_speech(inputs["input_ids"], speaker_embedding, vocoder=models.tts_vocoder).to(
-            device=device)
+            device=tts_device)
+    # HC    device=device)
     time_end = datetime.datetime.now()
     infer_time = time_end - time_start
     infer_time_milliseconds = infer_time.total_seconds() * 1000
@@ -1164,7 +1172,7 @@ def flask_request(text: str):
     logger.debug("preparing flask request...")
     try:
         headers = {'Content-Type': 'application/json'}
-        response = requests.post('http://10.0.0.30:19091/backchat', json={'text': text}, headers=headers)
+        response = requests.post('http://10.0.0.18:19091/backchat', json={'text': text}, headers=headers)
         response.raise_for_status()
         logger.debug("flask request complete")
         return response.text
