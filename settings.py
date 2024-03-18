@@ -67,7 +67,8 @@ class APISettings(BaseSettings):
     sv_threshold: float = 0.75
 
     # The default whisper model to use. Options are "tiny", "base", "small", "medium", "large"
-    whisper_model_default: str = 'medium'
+#   whisper_model_default: str = 'medium'
+    whisper_model_default: str = 'large'
 
     # Default TTS format to use
     tts_default_format: str = "FLAC"
